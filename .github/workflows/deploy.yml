@@ -33,8 +33,7 @@ jobs:
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     
     - name: Run pytest
-      run: |
-        pytest -v --tb=short || exit 1
+      run: pytest -v --tb=short
 
   build:
     name: Build & Push
@@ -45,11 +44,16 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Convert repository owner to lowercase
+      id: repo_owner
+      run: |
+        echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
+        username: ${{ steps.repo_owner.outputs.owner }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build & Push Docker Image
@@ -57,7 +61,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        tags: ghcr.io/${{ steps.repo_owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
   deploy:
     name: Deploy to VPS
@@ -71,9 +75,10 @@ jobs:
     - name: Verify stack.yml exists
       run: |
         if [ ! -f stack.yml ]; then
-          echo "ERROR: stack.yml no existe"
+          echo "❌ ERROR: stack.yml no existe"
           exit 1
         fi
+        echo "✔ stack.yml encontrado"
         ls -la
 
     - name: Copy stack.yml to VPS
@@ -85,7 +90,6 @@ jobs:
         port: ${{ secrets.VPS_SSH_PORT }}
         source: "stack.yml"
         target: "/home/${{ secrets.VPS_USER }}/despliegue"
-        strip_components: 0
 
     - name: Deploy stack in server
       uses: appleboy/ssh-action@v1
@@ -95,10 +99,16 @@ jobs:
         password: ${{ secrets.VPS_PASSWORD }}
         port: ${{ secrets.VPS_SSH_PORT }}
         script: |
-          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-          docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          
+          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u $OWNER --password-stdin
+          
+          docker pull ghcr.io/$OWNER/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          
           docker stack rm usina || true
           sleep 20
+          
           cd ~/despliegue
           docker stack deploy --with-registry-auth -c stack.yml usina
+          
           docker service ls
