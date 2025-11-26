@@ -1,5 +1,5 @@
-name: Deploy Final JSCU GHOST
-#
+name: Deploy Final JSCU
+
 on:
   push:
     branches: ["usiña"]
@@ -11,30 +11,31 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: usina
-  IMAGE_TAG: 1.0.5
+  IMAGE_TAG: 1.1.5
+  REPO_OWNER: elzero002
 
 jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-
+    
     - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: "3.11"
-
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
+    
     - name: Run pytest
-      run: pytest -v --tb=short
-
+      run: |
+        pytest -v --tb=short || exit 1
 
   build:
     name: Build & Push
@@ -45,15 +46,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Convert repository owner to lowercase
-      id: repo_owner
-      run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
-
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
+        username: ${{ env.REPO_OWNER }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build & Push Docker Image
@@ -61,8 +58,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: ghcr.io/${{ steps.repo_owner.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
+        tags: ghcr.io/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
   deploy:
     name: Deploy to VPS
@@ -76,10 +72,9 @@ jobs:
     - name: Verify stack.yml exists
       run: |
         if [ ! -f stack.yml ]; then
-          echo "❌ ERROR: stack.yml no existe"
+          echo "ERROR: stack.yml no existe"
           exit 1
         fi
-        echo "✔ stack.yml encontrado"
         ls -la
 
     - name: Copy stack.yml to VPS
@@ -91,6 +86,7 @@ jobs:
         port: ${{ secrets.VPS_SSH_PORT }}
         source: "stack.yml"
         target: "/home/${{ secrets.VPS_USER }}/despliegue"
+        strip_components: 0
 
     - name: Deploy stack in server
       uses: appleboy/ssh-action@v1
@@ -100,25 +96,10 @@ jobs:
         password: ${{ secrets.VPS_PASSWORD }}
         port: ${{ secrets.VPS_SSH_PORT }}
         script: |
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-
-          echo "→ Autenticando en GHCR..."
-          if [ -n "${{ secrets.GHCR_PAT }}" ]; then
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u $OWNER --password-stdin
-          else
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $OWNER --password-stdin
-          fi
-
-          echo "→ Pull de la nueva imagen..."
-          docker pull ghcr.io/$OWNER/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-          echo "→ Eliminando stack previo..."
+          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ env.REPO_OWNER }} --password-stdin
+          docker pull ghcr.io/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           docker stack rm usina || true
           sleep 20
-
-          echo "→ Desplegando nueva versión..."
           cd ~/despliegue
           docker stack deploy --with-registry-auth -c stack.yml usina
-
-          echo "→ Verificando servicios..."
           docker service ls

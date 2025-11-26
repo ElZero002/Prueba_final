@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   usina:
-    image: ghcr.io/elzero002/usina:1.0.5
+    image: ghcr.io/elzero002/usina:1.1.5
     deploy:
       replicas: 1
       labels:
