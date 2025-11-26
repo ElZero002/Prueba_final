@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  packages: write
+  packages: write  # Esto está bien, pero el PAT es el que permitirá el push real
 
 env:
   REGISTRY: ghcr.io
@@ -20,22 +20,22 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
-    - name: Run pytest
-      run: |
-        pytest -v --tb=short || exit 1
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      
+      - name: Run pytest
+        run: |
+          pytest -v --tb=short || exit 1
 
   build:
     name: Build & Push
@@ -43,22 +43,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ env.REPO_OWNER }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REPO_OWNER }}
+          password: ${{ secrets.GHCR_PAT }}  # Usar PAT con write:packages
 
-    - name: Build & Push Docker Image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        push: true
-        tags: ghcr.io/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+      - name: Build & Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
   deploy:
     name: Deploy to VPS
@@ -66,40 +66,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Verify stack.yml exists
-      run: |
-        if [ ! -f stack.yml ]; then
-          echo "ERROR: stack.yml no existe"
-          exit 1
-        fi
-        ls -la
+      - name: Verify stack.yml exists
+        run: |
+          if [ ! -f stack.yml ]; then
+            echo "ERROR: stack.yml no existe"
+            exit 1
+          fi
+          ls -la
 
-    - name: Copy stack.yml to VPS
-      uses: appleboy/scp-action@v1
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USER }}
-        password: ${{ secrets.VPS_PASSWORD }}
-        port: ${{ secrets.VPS_SSH_PORT }}
-        source: "stack.yml"
-        target: "/home/${{ secrets.VPS_USER }}/despliegue"
-        strip_components: 0
+      - name: Copy stack.yml to VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          source: "stack.yml"
+          target: "/home/${{ secrets.VPS_USER }}/despliegue"
+          strip_components: 0
 
-    - name: Deploy stack in server
-      uses: appleboy/ssh-action@v1
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USER }}
-        password: ${{ secrets.VPS_PASSWORD }}
-        port: ${{ secrets.VPS_SSH_PORT }}
-        script: |
-          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ env.REPO_OWNER }} --password-stdin
-          docker pull ghcr.io/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker stack rm usina || true
-          sleep 20
-          cd ~/despliegue
-          docker stack deploy --with-registry-auth -c stack.yml usina
-          docker service ls
+      - name: Deploy stack in server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ env.REPO_OWNER }} --password-stdin
+            docker pull ghcr.io/${{ env.REPO_OWNER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            docker stack rm usina || true
+            sleep 20
+            cd ~/despliegue
+            docker stack deploy --with-registry-auth -c stack.yml usina
+            docker service ls
